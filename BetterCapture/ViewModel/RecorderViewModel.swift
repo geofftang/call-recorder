@@ -256,7 +256,7 @@ final class RecorderViewModel {
 
             // Setup asset writer
             let outputURL = settings.generateOutputURL()
-            try assetWriter.setup(url: outputURL, settings: settings, videoSize: videoSize)
+            try assetWriter.setup(url: outputURL, settings: settings)
             try assetWriter.startWriting()
             logger.info("AssetWriter ready")
 
