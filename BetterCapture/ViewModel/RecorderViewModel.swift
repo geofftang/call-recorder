@@ -321,11 +321,14 @@ final class RecorderViewModel {
 
             logger.info("Recording stopped and saved to: \(outputURL.lastPathComponent)")
 
+            // Move raw file to Kopia-backed recordings dir and fire dictate.py detached.
+            let notifyURL = Self.moveToRecordingsAndTranscribe(outputURL, logger: logger) ?? outputURL
+
             // Brief delay to ensure screen sharing mode has fully stopped before sending notification
             try? await Task.sleep(for: .milliseconds(100))
 
             // Send notification
-            notificationService.sendRecordingSavedNotification(fileURL: outputURL)
+            notificationService.sendRecordingSavedNotification(fileURL: notifyURL)
 
             settings.stopAccessingOutputDirectory()
 
@@ -418,6 +421,84 @@ final class RecorderViewModel {
         }
 
         return CGSize(width: 1920, height: 1080)
+    }
+}
+
+// MARK: - Dictate Handoff
+
+extension RecorderViewModel {
+
+    // Vault root for this machine — vault name is the stable identifier.
+    private static let vaultRoot: URL = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent("Library/Application Support/executive-function-test")
+
+    /// Moves the raw recording into domains/recordings/{date}-{slug}/, then fires dictate.py
+    /// detached so transcription runs without blocking the UI.
+    /// Returns the moved audio URL (for notification), or nil if the move failed.
+    @discardableResult
+    private static func moveToRecordingsAndTranscribe(_ outputURL: URL, logger: Logger) -> URL? {
+        let (slug, date) = deriveSlugAndDate(from: outputURL)
+        let folderName = "\(date)-\(slug)"
+        let destFolder = vaultRoot
+            .appendingPathComponent("domains/recordings")
+            .appendingPathComponent(folderName)
+        let destAudio = destFolder.appendingPathComponent("audio.m4a")
+
+        do {
+            try FileManager.default.createDirectory(at: destFolder, withIntermediateDirectories: true)
+            try FileManager.default.moveItem(at: outputURL, to: destAudio)
+            logger.info("Moved recording → recordings/\(folderName)/audio.m4a")
+        } catch {
+            logger.error("Failed to move recording to recordings dir: \(error.localizedDescription)")
+            return nil
+        }
+
+        // Log file for diagnosing transcription failures.
+        let logPath = destFolder.appendingPathComponent("transcription.log").path
+        FileManager.default.createFile(atPath: logPath, contents: nil)
+        let logHandle = FileHandle(forWritingAtPath: logPath) ?? FileHandle.nullDevice
+
+        let dictateScript = vaultRoot.appendingPathComponent("system/scripts/dictate.py")
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = [
+            "python3", dictateScript.path,
+            destAudio.path,
+            "--diarize", "--store",
+            "--slug", slug,
+        ]
+        process.environment = ProcessInfo.processInfo.environment
+        process.standardOutput = logHandle
+        process.standardError = logHandle
+
+        do {
+            try process.run()
+            logger.info("dictate.py launched for recordings/\(folderName)")
+        } catch {
+            logger.error("Failed to launch dictate.py: \(error.localizedDescription)")
+        }
+
+        return destAudio
+    }
+
+    /// Derives a short slug and date string from the output filename.
+    /// Filename format: "CallRecording_2026-06-19-13.14.15.m4a"
+    private static func deriveSlugAndDate(from url: URL) -> (slug: String, date: String) {
+        let stem = url.deletingPathExtension().lastPathComponent
+        if let u = stem.firstIndex(of: "_") {
+            let rest = String(stem[stem.index(after: u)...])
+            let c = rest.components(separatedBy: "-")
+            if c.count >= 4 {
+                let date = "\(c[0])-\(c[1])-\(c[2])"
+                let time = c[3].replacingOccurrences(of: ".", with: "")
+                return ("call-\(time)", date)
+            } else if c.count >= 3 {
+                return ("call", "\(c[0])-\(c[1])-\(c[2])")
+            }
+        }
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        return ("call", f.string(from: Date()))
     }
 }
 
