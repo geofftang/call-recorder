@@ -113,10 +113,20 @@ final class RecorderViewModel {
 
     // MARK: - Permission Methods
 
-    /// Requests required permissions on app launch
-    /// Only requests microphone permission if microphone capture is enabled
+    /// Requests required permissions on app launch, then auto-selects the primary display
+    /// so recording is ready immediately without user picking content.
     func requestPermissionsOnLaunch() async {
         await permissionService.requestPermissions(includeMicrophone: settings.captureMicrophone)
+        await autoSelectPrimaryDisplay()
+    }
+
+    /// Selects the primary display as the SCK content filter. Captures all system audio.
+    func autoSelectPrimaryDisplay() async {
+        guard let content = try? await SCShareableContent.current,
+              let display = content.displays.first else { return }
+        let filter = SCContentFilter(display: display, excludingWindows: [])
+        selectedContentFilter = filter
+        try? await captureEngine.updateFilter(filter)
     }
 
     /// Refreshes the current permission states
@@ -216,7 +226,7 @@ final class RecorderViewModel {
             await previewService.setContentFilter(filter, sourceRect: sourceRect)
 
             // Show the recording overlay on the screen where the area was selected
-            recordingOverlay.show(viewModel: self, screen: selectedScreen)
+            // overlay suppressed — audio-only, record from menu bar
 
         } catch {
             selectionBorderFrame.dismiss()
@@ -432,7 +442,7 @@ extension RecorderViewModel: CaptureEngineDelegate {
 
         // Show the recording overlay. For picker selections there is no stored screen
         // (selectedScreen is nil), so the overlay positions itself below the status item.
-        recordingOverlay.show(viewModel: self, screen: selectedScreen)
+        // overlay suppressed — audio-only, record from menu bar
     }
 
     func captureEngine(_ engine: CaptureEngine, didStopWithError error: Error?) {

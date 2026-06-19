@@ -13,8 +13,6 @@ struct MenuBarView: View {
     @Bindable var viewModel: RecorderViewModel
     @Environment(\.openSettings) private var openSettings
     @Environment(\.dismiss) private var dismiss
-    @State private var currentPreview: NSImage?
-
     private var isRecording: Bool { viewModel.isRecording }
 
     var body: some View {
@@ -57,66 +55,11 @@ struct MenuBarView: View {
 
             MenuBarDivider()
 
-            // Content Selection
-            ContentSelectionButton(viewModel: viewModel) { dismiss() }
-                .disabled(isRecording)
-
-            // Preview thumbnail
-            if viewModel.hasContentSelected {
-                PreviewThumbnailView(
-                    previewImage: currentPreview,
-                    isLivePreviewActive: viewModel.previewService.isCapturing,
-                    onStartLivePreview: {
-                        Task {
-                            await viewModel.startPreview()
-                        }
-                    },
-                    onStopLivePreview: {
-                        Task {
-                            await viewModel.stopPreview()
-                        }
-                    }
-                )
-                .onChange(of: viewModel.previewService.previewImage) { _, newImage in
-                    currentPreview = newImage
-                }
-                .onAppear {
-                    currentPreview = viewModel.previewService.previewImage
-                }
-
-                Button {
-                    Task {
-                        await viewModel.resetAreaSelection()
-                    }
-                } label: {
-                    Text("Reset Selection")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(.red)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 6)
-                        .background(.gray.opacity(0.15), in: .rect(cornerRadius: 6))
-                }
-                .buttonStyle(.plain)
-                .padding(.horizontal, 12)
-                .disabled(isRecording)
-            }
-
-            MenuBarDivider()
-
-            // Settings Sections
-            Group {
-                VideoSettingsSection(settings: viewModel.settings)
-
-                PresenterOverlaySettingsSection(
-                    settings: viewModel.settings,
-                    cameraDeviceService: viewModel.cameraDeviceService
-                )
-
-                AudioSettingsSection(
-                    settings: viewModel.settings,
-                    audioDeviceService: viewModel.audioDeviceService
-                )
-            }
+            // Audio Settings
+            AudioSettingsSection(
+                settings: viewModel.settings,
+                audioDeviceService: viewModel.audioDeviceService
+            )
             .disabled(isRecording)
 
             MenuBarDivider()
