@@ -453,6 +453,27 @@ extension RecorderViewModel {
             return nil
         }
 
+        // Ensure Homebrew binaries (ffmpeg, python3) are on PATH when app is launched from Finder.
+        var env = ProcessInfo.processInfo.environment
+        let currentPath = env["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
+        env["PATH"] = "/opt/homebrew/bin:/usr/local/bin:" + currentPath
+
+        // Mixed stereo file so any player (QuickTime, VLC, IINA) can play both sides.
+        let mixedAudio = destFolder.appendingPathComponent("mixed.m4a")
+        let mixProcess = Process()
+        mixProcess.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        mixProcess.arguments = [
+            "ffmpeg", "-y", "-i", destAudio.path,
+            "-filter_complex", "[0:a:0][0:a:1]amix=inputs=2[a]",
+            "-map", "[a]", "-c:a", "aac", "-b:a", "256k",
+            mixedAudio.path,
+        ]
+        mixProcess.environment = env
+        mixProcess.standardOutput = FileHandle.nullDevice
+        mixProcess.standardError = FileHandle.nullDevice
+        try? mixProcess.run()
+        mixProcess.waitUntilExit()
+
         // Log file for diagnosing transcription failures.
         let logPath = destFolder.appendingPathComponent("transcription.log").path
         FileManager.default.createFile(atPath: logPath, contents: nil)
@@ -467,7 +488,7 @@ extension RecorderViewModel {
             "--diarize", "--store",
             "--slug", slug,
         ]
-        process.environment = ProcessInfo.processInfo.environment
+        process.environment = env
         process.standardOutput = logHandle
         process.standardError = logHandle
 
@@ -478,7 +499,7 @@ extension RecorderViewModel {
             logger.error("Failed to launch dictate.py: \(error.localizedDescription)")
         }
 
-        return destAudio
+        return mixedAudio
     }
 
     /// Derives a short slug and date string from the output filename.
